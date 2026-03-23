@@ -1,0 +1,52 @@
+networks:
+  saas_network:
+    external: true
+    name: saas_network
+
+services:
+  google-postgres:
+    image: postgres:16-alpine
+    container_name: google_db
+    environment:
+      POSTGRES_DB: google_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - google_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - saas_network
+
+  google-service:
+    build:
+      context: ..
+      dockerfile: google_service/Dockerfile
+    container_name: google-service
+    ports:
+      - "8082:8082"
+    environment:
+      JWT_SECRET: local-dev-secret-key-change-in-production-32ch
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      GOOGLE_REDIRECT_URI: http://localhost:8081/google/auth/callback
+      GOOGLE_CALENDAR_REDIRECT_URI: http://localhost:8081/google/calendar/callback
+      AUTH_SERVICE_URL: http://auth-service:8080
+      FRONTEND_URL: http://localhost:3000
+      DB_HOST: google-postgres
+      DB_PORT: 5432
+      DB_NAME: google_db
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+    depends_on:
+      google-postgres:
+        condition: service_healthy
+    networks:
+      - saas_network
+
+volumes:
+  google_postgres_data:
