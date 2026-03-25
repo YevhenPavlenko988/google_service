@@ -37,6 +37,10 @@ services:
       GOOGLE_CALENDAR_REDIRECT_URI: http://localhost:8081/google/calendar/callback
       AUTH_SERVICE_URL: http://auth-service:8080
       FRONTEND_URL: http://localhost:3000
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_PASS: ${RABBITMQ_PASS:-guest}
       DB_HOST: google-postgres
       DB_PORT: 5432
       DB_NAME: google_db

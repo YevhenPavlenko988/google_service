@@ -10,6 +10,8 @@ import com.github.yevhen.googleservice.dto.GoogleTokenResponse;
 import com.github.yevhen.googleservice.dto.GoogleUserInfo;
 import com.github.yevhen.googleservice.model.GoogleToken;
 import com.github.yevhen.googleservice.repository.GoogleTokenRepository;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,12 +27,9 @@ import org.springframework.web.util.UriComponentsBuilder;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class GoogleAuthService {
@@ -39,12 +38,7 @@ public class GoogleAuthService {
 
     private static final String AUTH_SCOPE = "openid email profile";
     private static final String CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar";
-
-    /** Login flow: state → Boolean */
-    private final Map<String, Boolean> pendingLoginStates = new ConcurrentHashMap<>();
-
-    /** Calendar connect flow: state → userId */
-    private final Map<String, UUID> pendingCalendarStates = new ConcurrentHashMap<>();
+    private static final long OAUTH_STATE_TTL_SECONDS = 600;
 
     private final GoogleProperties googleProps;
     private final JwtHelper jwtHelper;
@@ -53,7 +47,6 @@ public class GoogleAuthService {
     private final GoogleTokenRepository googleTokenRepository;
     private final String authServiceUrl;
     private final String frontendUrl;
-    private final SecureRandom secureRandom = new SecureRandom();
 
     public GoogleAuthService(
             GoogleProperties googleProps,
@@ -76,8 +69,7 @@ public class GoogleAuthService {
     // ─── Login OAuth flow ────────────────────────────────────────────────────
 
     public String buildAuthorizationUrl() {
-        String state = generateState();
-        pendingLoginStates.put(state, true);
+        String state = generateStateToken("login", null);
 
         return UriComponentsBuilder.fromHttpUrl(googleProps.getAuthUri())
                 .queryParam("client_id", googleProps.getClientId())
@@ -94,8 +86,10 @@ public class GoogleAuthService {
         log.info("Auth callback: state={}, code_prefix={}", state,
                 code != null && code.length() > 8 ? code.substring(0, 8) : code);
 
-        if (!pendingLoginStates.remove(state, true)) {
-            throw new ServiceException("Invalid or expired OAuth state", HttpStatus.BAD_REQUEST);
+        Claims claims = parseStateToken(state);
+        String flow = claims.get("flow", String.class);
+        if (!"login".equals(flow)) {
+            throw new ServiceException("Invalid OAuth state flow", HttpStatus.BAD_REQUEST);
         }
 
         GoogleTokenResponse googleTokens = exchangeCodeForTokens(code, googleProps.getRedirectUri());
@@ -125,8 +119,7 @@ public class GoogleAuthService {
 
     public String buildCalendarConnectUrl(String authorizationHeader) {
         UUID userId = jwtHelper.extractCallerInfo(authorizationHeader).id();
-        String state = generateState();
-        pendingCalendarStates.put(state, userId);
+        String state = generateStateToken("calendar", userId);
 
         return UriComponentsBuilder.fromHttpUrl(googleProps.getAuthUri())
                 .queryParam("client_id", googleProps.getClientId())
@@ -142,10 +135,16 @@ public class GoogleAuthService {
 
     @Transactional
     public String handleCalendarCallback(String code, String state) {
-        UUID userId = pendingCalendarStates.remove(state);
-        if (userId == null) {
-            throw new ServiceException("Invalid or expired OAuth state", HttpStatus.BAD_REQUEST);
+        Claims claims = parseStateToken(state);
+        String flow = claims.get("flow", String.class);
+        if (!"calendar".equals(flow)) {
+            throw new ServiceException("Invalid OAuth state flow", HttpStatus.BAD_REQUEST);
         }
+        String userIdValue = claims.get("userId", String.class);
+        if (userIdValue == null || userIdValue.isBlank()) {
+            throw new ServiceException("Invalid OAuth state payload", HttpStatus.BAD_REQUEST);
+        }
+        UUID userId = UUID.fromString(userIdValue);
 
         GoogleTokenResponse tokens = exchangeCodeForTokens(code, googleProps.getCalendarRedirectUri());
 
@@ -247,9 +246,28 @@ public class GoogleAuthService {
         }
     }
 
-    private String generateState() {
-        byte[] bytes = new byte[24];
-        secureRandom.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    private String generateStateToken(String flow, UUID userId) {
+        long now = System.currentTimeMillis();
+        var builder = Jwts.builder()
+                .claim("flow", flow)
+                .issuedAt(new java.util.Date(now))
+                .expiration(new java.util.Date(now + OAUTH_STATE_TTL_SECONDS * 1000))
+                .signWith(jwtHelper.getKey());
+        if (userId != null) {
+            builder.claim("userId", userId.toString());
+        }
+        return builder.compact();
+    }
+
+    private Claims parseStateToken(String state) {
+        try {
+            return Jwts.parser()
+                    .verifyWith(jwtHelper.getKey())
+                    .build()
+                    .parseSignedClaims(state)
+                    .getPayload();
+        } catch (Exception e) {
+            throw new ServiceException("Invalid or expired OAuth state", HttpStatus.BAD_REQUEST);
+        }
     }
 }
