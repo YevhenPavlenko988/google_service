@@ -4,6 +4,7 @@ import com.github.yevhen.common.config.JwtProperties;
 import com.github.yevhen.common.exception.ServiceException;
 import com.github.yevhen.common.security.JwtHelper;
 import com.github.yevhen.googleservice.config.GoogleProperties;
+import com.github.yevhen.googleservice.dto.AppTokenResponse;
 import com.github.yevhen.googleservice.dto.AuthUserResponse;
 import com.github.yevhen.googleservice.dto.GoogleAuthInternalRequest;
 import com.github.yevhen.googleservice.dto.GoogleTokenResponse;
@@ -101,16 +102,14 @@ public class GoogleAuthService {
 
         AuthUserResponse user = findOrCreateUser(userInfo.sub(), userInfo.email());
 
-        String accessToken = jwtHelper.generateAccessToken(
-                user.id(), user.email(), user.role(), jwtProperties.getAccessExpiration());
-        String refreshToken = jwtHelper.generateRefreshToken(
-                user.id(), jwtProperties.getRefreshExpiration());
-        long expiresIn = jwtProperties.getAccessExpiration();
+        // Issue tokens via auth-service so the refresh token JTI is stored in Redis
+        // (direct jwtHelper generation bypasses Redis and breaks /auth/refresh)
+        AppTokenResponse appTokens = issueTokensViaAuthService(user.id());
 
         return UriComponentsBuilder.fromHttpUrl(frontendUrl)
-                .fragment("access_token=" + accessToken
-                        + "&refresh_token=" + refreshToken
-                        + "&expires_in=" + expiresIn)
+                .fragment("access_token=" + appTokens.accessToken()
+                        + "&refresh_token=" + appTokens.refreshToken()
+                        + "&expires_in=" + appTokens.expiresIn())
                 .build(true)
                 .toUriString();
     }
@@ -243,6 +242,20 @@ public class GoogleAuthService {
                     .body(AuthUserResponse.class);
         } catch (Exception e) {
             throw new ServiceException("Failed to resolve user in auth service", HttpStatus.BAD_GATEWAY);
+        }
+    }
+
+    private AppTokenResponse issueTokensViaAuthService(java.util.UUID userId) {
+        try {
+            return restClient.post()
+                    .uri(authServiceUrl + "/internal/issue-tokens")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(java.util.Map.of("userId", userId.toString()))
+                    .retrieve()
+                    .body(AppTokenResponse.class);
+        } catch (Exception e) {
+            log.error("Failed to issue tokens via auth service: {}", e.getMessage());
+            throw new ServiceException("Failed to issue tokens", HttpStatus.BAD_GATEWAY);
         }
     }
 

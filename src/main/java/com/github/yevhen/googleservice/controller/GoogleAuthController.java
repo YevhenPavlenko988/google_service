@@ -6,6 +6,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 @RestController
@@ -25,7 +27,8 @@ public class GoogleAuthController {
 
     @GetMapping("/auth/callback")
     public ResponseEntity<Void> callback(@RequestParam String code, @RequestParam String state) {
-        String redirectUrl = googleAuthService.handleCallback(code, state);
+        String decodedCode = code.contains("%") ? URLDecoder.decode(code, StandardCharsets.UTF_8) : code;
+        String redirectUrl = googleAuthService.handleCallback(decodedCode, state);
         return ResponseEntity.status(302).location(URI.create(redirectUrl)).build();
     }
 
@@ -41,7 +44,8 @@ public class GoogleAuthController {
     /** Public callback from Google after calendar permission granted. */
     @GetMapping("/calendar/callback")
     public ResponseEntity<Void> calendarCallback(@RequestParam String code, @RequestParam String state) {
-        String redirectUrl = googleAuthService.handleCalendarCallback(code, state);
+        String decodedCode = code.contains("%") ? URLDecoder.decode(code, StandardCharsets.UTF_8) : code;
+        String redirectUrl = googleAuthService.handleCalendarCallback(decodedCode, state);
         return ResponseEntity.status(302).location(URI.create(redirectUrl)).build();
     }
 
