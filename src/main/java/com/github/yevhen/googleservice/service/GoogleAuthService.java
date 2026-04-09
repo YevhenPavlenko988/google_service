@@ -233,28 +233,91 @@ public class GoogleAuthService {
     }
 
     private AuthUserResponse findOrCreateUser(String googleId, String email) {
+        String primary = authServiceUrl + "/internal/google-auth";
+        String fallback = "http://auth-service:8080/internal/google-auth";
         try {
             return restClient.post()
-                    .uri(authServiceUrl + "/internal/google-auth")
+                    .uri(primary)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(new GoogleAuthInternalRequest(googleId, email))
                     .retrieve()
                     .body(AuthUserResponse.class);
+        } catch (RestClientResponseException e) {
+            log.error("Auth service google-auth failed: url={}, status={}, body={}", primary, e.getStatusCode(), e.getResponseBodyAsString());
+            if (!fallback.startsWith(authServiceUrl)) {
+                try {
+                    return restClient.post()
+                            .uri(fallback)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body(new GoogleAuthInternalRequest(googleId, email))
+                            .retrieve()
+                            .body(AuthUserResponse.class);
+                } catch (RestClientResponseException ex) {
+                    log.error("Auth service google-auth fallback failed: url={}, status={}, body={}", fallback, ex.getStatusCode(), ex.getResponseBodyAsString());
+                } catch (Exception ex) {
+                    log.error("Auth service google-auth fallback failed: url={}, message={}", fallback, ex.getMessage());
+                }
+            }
+            throw new ServiceException("Failed to resolve user in auth service", HttpStatus.BAD_GATEWAY);
         } catch (Exception e) {
+            log.error("Auth service google-auth failed: url={}, message={}", primary, e.getMessage());
+            if (!fallback.startsWith(authServiceUrl)) {
+                try {
+                    return restClient.post()
+                            .uri(fallback)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body(new GoogleAuthInternalRequest(googleId, email))
+                            .retrieve()
+                            .body(AuthUserResponse.class);
+                } catch (Exception ex) {
+                    log.error("Auth service google-auth fallback failed: url={}, message={}", fallback, ex.getMessage());
+                }
+            }
             throw new ServiceException("Failed to resolve user in auth service", HttpStatus.BAD_GATEWAY);
         }
     }
 
     private AppTokenResponse issueTokensViaAuthService(java.util.UUID userId) {
+        String primary = authServiceUrl + "/internal/issue-tokens";
+        String fallback = "http://auth-service:8080/internal/issue-tokens";
         try {
             return restClient.post()
-                    .uri(authServiceUrl + "/internal/issue-tokens")
+                    .uri(primary)
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(java.util.Map.of("userId", userId.toString()))
                     .retrieve()
                     .body(AppTokenResponse.class);
+        } catch (RestClientResponseException e) {
+            log.error("Auth service issue-tokens failed: url={}, status={}, body={}", primary, e.getStatusCode(), e.getResponseBodyAsString());
+            if (!fallback.startsWith(authServiceUrl)) {
+                try {
+                    return restClient.post()
+                            .uri(fallback)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("userId", userId.toString()))
+                            .retrieve()
+                            .body(AppTokenResponse.class);
+                } catch (RestClientResponseException ex) {
+                    log.error("Auth service issue-tokens fallback failed: url={}, status={}, body={}", fallback, ex.getStatusCode(), ex.getResponseBodyAsString());
+                } catch (Exception ex) {
+                    log.error("Auth service issue-tokens fallback failed: url={}, message={}", fallback, ex.getMessage());
+                }
+            }
+            throw new ServiceException("Failed to issue tokens", HttpStatus.BAD_GATEWAY);
         } catch (Exception e) {
-            log.error("Failed to issue tokens via auth service: {}", e.getMessage());
+            log.error("Auth service issue-tokens failed: url={}, message={}", primary, e.getMessage());
+            if (!fallback.startsWith(authServiceUrl)) {
+                try {
+                    return restClient.post()
+                            .uri(fallback)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .body(java.util.Map.of("userId", userId.toString()))
+                            .retrieve()
+                            .body(AppTokenResponse.class);
+                } catch (Exception ex) {
+                    log.error("Auth service issue-tokens fallback failed: url={}, message={}", fallback, ex.getMessage());
+                }
+            }
             throw new ServiceException("Failed to issue tokens", HttpStatus.BAD_GATEWAY);
         }
     }
