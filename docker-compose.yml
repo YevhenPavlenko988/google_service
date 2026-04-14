@@ -30,7 +30,7 @@ services:
       - "8082:8082"
     environment:
       JWT_SECRET: local-dev-secret-key-change-in-production-32ch
-      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true"
+      JAVA_TOOL_OPTIONS: "-Djava.net.preferIPv4Stack=true -Xmx384m -Xms128m"
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
       GOOGLE_REDIRECT_URI: http://localhost:8081/google/auth/callback
