@@ -58,6 +58,7 @@ public class GoogleCalendarService {
     private final RabbitTemplate rabbitTemplate;
     private final RestClient restClient;
     private final String authServiceUrl;
+    private final String jitsiServiceUrl;
 
     public GoogleCalendarService(
             JwtHelper jwtHelper,
@@ -70,7 +71,8 @@ public class GoogleCalendarService {
             ApplicationEventPublisher eventPublisher,
             RabbitTemplate rabbitTemplate,
             RestClient restClient,
-            @org.springframework.beans.factory.annotation.Value("${app.auth-service-url}") String authServiceUrl
+            @org.springframework.beans.factory.annotation.Value("${app.auth-service-url}") String authServiceUrl,
+            @org.springframework.beans.factory.annotation.Value("${app.jitsi-service-url:http://jitsi-meet:8083}") String jitsiServiceUrl
     ) {
         this.jwtHelper = jwtHelper;
         this.googleProps = googleProps;
@@ -83,6 +85,7 @@ public class GoogleCalendarService {
         this.rabbitTemplate = rabbitTemplate;
         this.restClient = restClient;
         this.authServiceUrl = authServiceUrl;
+        this.jitsiServiceUrl = jitsiServiceUrl;
     }
 
     public List<CalendarEventResponse> listEvents(String authorizationHeader) {
@@ -131,6 +134,8 @@ public class GoogleCalendarService {
         participantRepository.saveAll(attendeeEmails.stream()
                 .map(email -> new EventParticipant(UUID.randomUUID(), event.getId(), email, resolvedUsers.get(email)))
                 .toList());
+
+        preCreateJitsiRoom(event, caller.id(), attendeeEmails);
 
         syncStatusRepository.saveAll(resolvedUsers.values().stream()
                 .map(userId -> new EventSyncStatus(UUID.randomUUID(), event.getId(), userId, EventSyncStatus.SyncStatus.PENDING))
@@ -230,7 +235,7 @@ public class GoogleCalendarService {
                         .retrieve()
                         .body(GoogleEventItem.class);
                 if (googleEvent != null) {
-                    return mapGoogleEventWithLocalId(event.getId(), googleEvent, attendeeEmails);
+                    return mapGoogleEventWithLocalId(event.getId(), googleEvent, attendeeEmails, event.getJitsiRoomName());
                 }
             } catch (Exception e) {
                 log.debug("Falling back to local event view for eventId={} userId={}", event.getId(), callerUserId);
@@ -239,7 +244,7 @@ public class GoogleCalendarService {
         return mapLocalEvent(event, attendeeEmails);
     }
 
-    private CalendarEventResponse mapGoogleEventWithLocalId(UUID localId, GoogleEventItem item, List<String> attendeeEmails) {
+    private CalendarEventResponse mapGoogleEventWithLocalId(UUID localId, GoogleEventItem item, List<String> attendeeEmails, String jitsiRoomName) {
         String start = item.start() != null ? item.start().dateTime() : null;
         String end = item.end() != null ? item.end().dateTime() : null;
         String meetLink = null;
@@ -257,7 +262,8 @@ public class GoogleCalendarService {
                 end,
                 item.htmlLink(),
                 meetLink,
-                attendeeEmails
+                attendeeEmails,
+                jitsiRoomName
         );
     }
 
@@ -269,7 +275,8 @@ public class GoogleCalendarService {
                 event.getEndDateTime().toString(),
                 null,
                 null,
-                attendeeEmails
+                attendeeEmails,
+                event.getJitsiRoomName()
         );
     }
 
@@ -310,6 +317,28 @@ public class GoogleCalendarService {
         } catch (Exception e) {
             log.warn("Failed to resolve users by email in auth service: {}", e.getMessage());
             return Map.of();
+        }
+    }
+
+    private void preCreateJitsiRoom(CalendarEvent event, UUID organizerId, List<String> participantEmails) {
+        try {
+            Map<?, ?> response = restClient.post()
+                    .uri(jitsiServiceUrl + "/jitsi/internal/rooms")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(Map.of(
+                            "createdByUserId", organizerId.toString(),
+                            "eventRef", event.getId().toString(),
+                            "participantEmails", participantEmails
+                    ))
+                    .retrieve()
+                    .body(Map.class);
+            if (response != null && response.get("roomName") instanceof String roomName) {
+                event.setJitsiRoomName(roomName);
+                calendarEventRepository.save(event);
+                log.info("Pre-created Jitsi room={} for calendarEvent={}", roomName, event.getId());
+            }
+        } catch (Exception e) {
+            log.warn("Could not pre-create Jitsi room for calendarEvent={}: {}", event.getId(), e.getMessage());
         }
     }
 

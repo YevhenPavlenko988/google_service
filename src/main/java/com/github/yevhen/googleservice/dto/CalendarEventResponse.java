@@ -9,5 +9,6 @@ public record CalendarEventResponse(
         String endDateTime,
         String htmlLink,
         String meetLink,
-        List<String> attendeeEmails
+        List<String> attendeeEmails,
+        String jitsiRoomName
 ) {}

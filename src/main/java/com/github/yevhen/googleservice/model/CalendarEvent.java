@@ -39,6 +39,9 @@ public class CalendarEvent {
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
 
+    @Column(name = "jitsi_room_name")
+    private String jitsiRoomName;
+
     protected CalendarEvent() {}
 
     public CalendarEvent(UUID id, UUID organizerUserId, String title, OffsetDateTime startDateTime, OffsetDateTime endDateTime) {
@@ -74,4 +77,6 @@ public class CalendarEvent {
     public void setStartDateTime(OffsetDateTime startDateTime) { this.startDateTime = startDateTime; }
     public void setEndDateTime(OffsetDateTime endDateTime) { this.endDateTime = endDateTime; }
     public void setDeleted(boolean deleted) { this.deleted = deleted; }
+    public String getJitsiRoomName() { return jitsiRoomName; }
+    public void setJitsiRoomName(String jitsiRoomName) { this.jitsiRoomName = jitsiRoomName; }
 }
